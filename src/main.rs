@@ -10,8 +10,71 @@ use std::io::LineWriter;
 use std::io::BufReader;
 use std::time::{Duration, Instant};
 use scraper::ElementRef;
+use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
+use std::thread;
+
 
 fn main() -> std::io::Result<()> {
+    let start = Instant::now();
+    download();
+    let duration = start.elapsed();
+    println!("This took:{}ms",duration.as_millis());
+    return Ok(());
+}
+fn get_input() -> String{
+    let mut s=String::new();
+    print!("Please enter a search term: ");
+    let _=stdout().flush();
+    stdin().read_line(&mut s).expect("Did not enter a correct string");
+    if let Some('\n')=s.chars().next_back() {
+        s.pop();
+    }
+    if let Some('\r')=s.chars().next_back() {
+        s.pop();
+    }
+    return s;
+}
+fn download() -> std::io::Result<()> {
+    let mut i = 0;
+    let file = File::create("songs.csv")?;
+    let mut file = LineWriter::new(file);
+    let locker = Mutex::new(file);
+    let arc_lock = Arc::new(locker);
+    let arc_copy = arc_lock.clone();
+    (1..200).into_par_iter().for_each(|i|{
+        let songs = scrape(i);
+        let mut file_handle = arc_copy.lock().unwrap();
+        for rowData in songs {
+            let mut joined = rowData.join(";");
+            joined.push('\n');
+            file_handle.write(joined.as_bytes());
+        }
+    });
+    return Ok(());
+}
+fn scrape(i:i32) -> Vec<Vec<String>>{
+    let response = reqwest::blocking::get(
+        format!("http://www.tjmedia.co.kr/tjsong/song_search_list.asp?strType=16&strText=0&strCond=0&searchOrderItem=&searchOrderType=&strSize05=100&intPage={}",i)
+    )
+    .unwrap()
+    .text()
+    .unwrap();
+    let document = scraper::Html::parse_document(&response);
+    let TR  = scraper::Selector::parse("tr").unwrap();
+    let TD  = scraper::Selector::parse("td").unwrap();
+    let title_selector = scraper::Selector::parse("table.board_type1").unwrap();
+    let titles = document.select(&title_selector).next().unwrap();
+    let mut my_vec: Vec<Vec<String>> = Vec::new();
+    for row in titles.select(&TR){
+        let entries = row.select(&TD)
+        .map(|val| val.inner_html())
+        .collect::<Vec<_>>();
+        my_vec.push(entries);
+    }
+    return my_vec;
+}
+fn get_api() -> std::io::Result<()> {
     //read data from file
     let file = File::open("songs.csv")?;
     let reader = BufReader::new(file);
@@ -47,64 +110,5 @@ fn main() -> std::io::Result<()> {
     //print duration
     let duration = start.elapsed();
     println!("This took:{}ms",duration.as_millis());
-    return Ok(());
-}
-fn get_input() -> String{
-    let mut s=String::new();
-    print!("Please enter a search term: ");
-    let _=stdout().flush();
-    stdin().read_line(&mut s).expect("Did not enter a correct string");
-    if let Some('\n')=s.chars().next_back() {
-        s.pop();
-    }
-    if let Some('\r')=s.chars().next_back() {
-        s.pop();
-    }
-    return s;
-}
-fn download() -> std::io::Result<()> {
-    let mut i = 0;
-    let file = File::create("songs.csv")?;
-    let mut file = LineWriter::new(file);
-    while true {
-        let response = reqwest::blocking::get(
-            format!("http://www.tjmedia.co.kr/tjsong/song_search_list.asp?strType=16&strText=0&strCond=0&searchOrderItem=&searchOrderType=&strSize05=100&intPage={}",i)
-        )
-        .unwrap()
-        .text()
-        .unwrap();
-        let document = scraper::Html::parse_document(&response);
-        let TR  = scraper::Selector::parse("tr").unwrap();
-        let TD  = scraper::Selector::parse("td").unwrap();
-        let title_selector = scraper::Selector::parse("table.board_type1").unwrap();
-        let titles = document.select(&title_selector).next().unwrap();
-        let mut my_vec: Vec<Vec<String>> = Vec::new();
-        for row in titles.select(&TR){
-            let entries = row.select(&TD)
-            .map(|val| val.inner_html())
-            .collect::<Vec<_>>();
-            my_vec.push(entries);
-        }
-        if my_vec.len() <= 0 {
-            break;
-        }
-        for rowData in my_vec {
-            let mut joined = rowData.join(";");
-            joined.push('\n');
-            file.write(joined.as_bytes());
-        }
-        i+=1;
-    }
-
-    // let titles = document.select(&title_selector).map(|x| x.inner_html());
-    // let mut my_vec: Vec<String> = Vec::new();
-    // let str = titles
-    // .zip(1..100);
-    // str.for_each(|(item, number)| my_vec.push(format!("{}. {}\n",number, item)));
-    // let file = File::create("poem.txt")?;
-    // let mut file = LineWriter::new(file);
-    // for ele in my_vec {
-    //     file.write(ele.as_bytes());
-    // }
     return Ok(());
 }
